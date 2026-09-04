@@ -1,0 +1,1 @@
+export default [{files:['src/**/*.js','prisma/**/*.js'],languageOptions:{ecmaVersion:2024,sourceType:'module',globals:{process:'readonly',console:'readonly',URL:'readonly'}},rules:{'no-unused-vars':['warn',{argsIgnorePattern:'^_'}],'no-undef':'error','no-constant-binary-expression':'error'}}];

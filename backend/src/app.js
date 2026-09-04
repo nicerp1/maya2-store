@@ -1,0 +1,96 @@
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { z } from 'zod';
+import { PrismaClient } from '@prisma/client';
+
+export const prisma = new PrismaClient();
+export const app = express();
+app.use(helmet());
+app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000', credentials: true }));
+app.use(express.json({ limit: '1mb' }));
+app.use('/api/auth', rateLimit({ windowMs: 15 * 60_000, limit: 100 }));
+const ok = (res, data, status = 200) => res.status(status).json({ success: true, data });
+const fail = (res, message, status = 400) => res.status(status).json({ success: false, message });
+const tokenFor = (user) => jwt.sign({ sub: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
+const auth = (roles = []) => async (req, res, next) => {
+  try {
+    const raw = req.headers.authorization?.replace('Bearer ', '');
+    req.auth = jwt.verify(raw, process.env.JWT_SECRET);
+    if (roles.length && !roles.includes(req.auth.role)) return fail(res, 'دسترسی غیرمجاز است', 403);
+    next();
+  } catch { return fail(res, 'ابتدا وارد حساب شوید', 401); }
+};
+
+app.get('/api/health', (_req, res) => ok(res, { service: 'maya-azma', status: 'ready' }));
+const siteSettingsSchema = z.object({ notice:z.string().min(2).max(120), phone:z.string().min(5).max(30), email:z.string().email(), address:z.string().min(3).max(300), hours:z.string().max(100), instagram:z.string().max(300).optional(), linkedin:z.string().max(300).optional(), shipping:z.coerce.number().int().min(0), freeShipping:z.coerce.number().int().min(0), aboutTitle:z.string().max(160).optional(), aboutText:z.string().max(8000).optional(), contactTitle:z.string().max(160).optional(), contactText:z.string().max(8000).optional() });
+app.get('/api/settings', async (_req,res,next)=>{try{const row=await prisma.siteSetting.findUnique({where:{key:'general'}});ok(res,row?.value||{});}catch(e){next(e);}});
+app.put('/api/admin/settings', auth(['ADMIN']), async(req,res,next)=>{try{const parsed=siteSettingsSchema.safeParse(req.body);if(!parsed.success)return fail(res,'اطلاعات تنظیمات معتبر نیست');const row=await prisma.siteSetting.upsert({where:{key:'general'},create:{key:'general',value:parsed.data},update:{value:parsed.data}});ok(res,row.value);}catch(e){next(e);}});
+app.post('/api/auth/register', async (req, res, next) => { try {
+  const { firstName, lastName, email, mobile, password } = req.body;
+  if (!firstName || !lastName || !email || !mobile || !password || password.length < 8) return fail(res, 'اطلاعات ثبت‌نام معتبر نیست');
+  const user = await prisma.user.create({ data: { firstName, lastName, email: email.toLowerCase(), mobile, passwordHash: await bcrypt.hash(password, 12), cart: { create: {} }, wishlist: { create: {} } }, select: { id:true, firstName:true, lastName:true, email:true, role:true } });
+  return ok(res, { user, token: tokenFor(user) }, 201);
+} catch (e) { next(e); } });
+app.post('/api/auth/login', async (req, res, next) => { try {
+  const user = await prisma.user.findUnique({ where: { email: String(req.body.email).toLowerCase() } });
+  if (!user || !user.active || !(await bcrypt.compare(req.body.password || '', user.passwordHash))) return fail(res, 'ایمیل یا رمز عبور نادرست است', 401);
+  const safeUser = { id:user.id, firstName:user.firstName, lastName:user.lastName, email:user.email, mobile:user.mobile, role:user.role, active:user.active, createdAt:user.createdAt, updatedAt:user.updatedAt }; return ok(res, { user: safeUser, token: tokenFor(user) });
+} catch(e) { next(e); } });
+app.get('/api/auth/me', auth(), async (req,res) => ok(res, await prisma.user.findUnique({ where:{id:req.auth.sub}, select:{id:true,firstName:true,lastName:true,email:true,mobile:true,role:true} })));
+app.get('/api/products', async (req,res,next) => { try {
+  const page = Math.max(1, Number(req.query.page)||1), limit = Math.min(48, Math.max(1, Number(req.query.limit)||12));
+  const where = { status:'ACTIVE', ...(req.query.category && {category:{slug:req.query.category}}), ...(req.query.brand && {brand:{slug:req.query.brand}}), ...(req.query.q && {OR:[{name:{contains:req.query.q,mode:'insensitive'}},{sku:{contains:req.query.q,mode:'insensitive'}},{brand:{name:{contains:req.query.q,mode:'insensitive'}}}]}) };
+  const [items,total] = await prisma.$transaction([prisma.product.findMany({where,include:{images:true,brand:true,category:true,variants:true},skip:(page-1)*limit,take:limit,orderBy:{createdAt:'desc'}}),prisma.product.count({where})]);
+  ok(res,{items,pagination:{page,limit,total,pages:Math.ceil(total/limit)}});
+} catch(e){next(e);} });
+app.get('/api/products/:slug', async (req,res,next)=>{try{const item=await prisma.product.findUnique({where:{slug:req.params.slug},include:{images:true,brand:true,category:true,variants:true,reviews:{where:{approved:true},include:{user:{select:{firstName:true,lastName:true}}}}}});return item?ok(res,item):fail(res,'محصول پیدا نشد',404);}catch(e){next(e);}});
+app.get('/api/categories', async (_req,res,next)=>{try{ok(res,await prisma.category.findMany({where:{active:true},orderBy:{order:'asc'}}));}catch(e){next(e);}});
+app.get('/api/brands', async (_req,res,next)=>{try{ok(res,await prisma.brand.findMany({where:{active:true},orderBy:{name:'asc'}}));}catch(e){next(e);}});
+app.post('/api/categories', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.category.create({data:req.body}),201);}catch(e){next(e);}});
+app.put('/api/categories/:id', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.category.update({where:{id:req.params.id},data:req.body}));}catch(e){next(e);}});
+app.delete('/api/categories/:id', auth(['ADMIN']), async(req,res,next)=>{try{await prisma.category.delete({where:{id:req.params.id}});ok(res,{deleted:true});}catch(e){next(e);}});
+app.post('/api/brands', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.brand.create({data:req.body}),201);}catch(e){next(e);}});
+app.put('/api/brands/:id', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.brand.update({where:{id:req.params.id},data:req.body}));}catch(e){next(e);}});
+app.delete('/api/brands/:id', auth(['ADMIN']), async(req,res,next)=>{try{await prisma.brand.delete({where:{id:req.params.id}});ok(res,{deleted:true});}catch(e){next(e);}});
+app.post('/api/products', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.product.create({data:req.body}),201);}catch(e){next(e);}});
+app.put('/api/products/:id', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.product.update({where:{id:req.params.id},data:req.body}));}catch(e){next(e);}});
+app.delete('/api/products/:id', auth(['ADMIN']), async(req,res,next)=>{try{await prisma.product.delete({where:{id:req.params.id}});ok(res,{deleted:true});}catch(e){next(e);}});
+app.post('/api/auth/forgot-password', async (req,res)=>ok(res,{message:'اگر حسابی با این ایمیل وجود داشته باشد، راهنمای بازیابی ارسال می‌شود.'}));
+app.get('/api/cart', auth(), async(req,res,next)=>{try{const cart=await prisma.cart.findUnique({where:{userId:req.auth.sub},include:{items:{include:{product:{include:{images:true}},variant:true}}}});ok(res,cart);}catch(e){next(e);}});
+app.post('/api/cart/items', auth(), async(req,res,next)=>{try{const quantity=Number(req.body.quantity||1);if(!Number.isInteger(quantity)||quantity<1)return fail(res,'تعداد نامعتبر است');const product=await prisma.product.findUnique({where:{id:req.body.productId}});if(!product||product.stock<quantity)return fail(res,'موجودی محصول کافی نیست',409);const cart=await prisma.cart.upsert({where:{userId:req.auth.sub},create:{userId:req.auth.sub},update:{}});const item=await prisma.cartItem.upsert({where:{cartId_productId_variantId:{cartId:cart.id,productId:product.id,variantId:req.body.variantId||null}},create:{cartId:cart.id,productId:product.id,variantId:req.body.variantId||null,quantity},update:{quantity:{increment:quantity}}});ok(res,item,201);}catch(e){next(e);}});
+app.patch('/api/cart/items/:id', auth(), async(req,res,next)=>{try{const quantity=Number(req.body.quantity);if(!Number.isInteger(quantity)||quantity<1)return fail(res,'تعداد نامعتبر است');const item=await prisma.cartItem.findFirst({where:{id:req.params.id,cart:{userId:req.auth.sub}},include:{product:true}});if(!item)return fail(res,'آیتم پیدا نشد',404);if(item.product.stock<quantity)return fail(res,'موجودی کافی نیست',409);ok(res,await prisma.cartItem.update({where:{id:item.id},data:{quantity}}));}catch(e){next(e);}});
+app.delete('/api/cart/items/:id', auth(), async(req,res,next)=>{try{const result=await prisma.cartItem.deleteMany({where:{id:req.params.id,cart:{userId:req.auth.sub}}});result.count?ok(res,{deleted:true}):fail(res,'آیتم پیدا نشد',404);}catch(e){next(e);}});
+app.get('/api/wishlist', auth(), async(req,res,next)=>{try{ok(res,await prisma.wishlist.findUnique({where:{userId:req.auth.sub},include:{items:{include:{product:{include:{images:true,brand:true}}}}}}));}catch(e){next(e);}});
+app.post('/api/wishlist', auth(), async(req,res,next)=>{try{const wish=await prisma.wishlist.upsert({where:{userId:req.auth.sub},create:{userId:req.auth.sub},update:{}});ok(res,await prisma.wishlistItem.upsert({where:{wishlistId_productId:{wishlistId:wish.id,productId:req.body.productId}},create:{wishlistId:wish.id,productId:req.body.productId},update:{}}),201);}catch(e){next(e);}});
+app.delete('/api/wishlist/:productId', auth(), async(req,res,next)=>{try{await prisma.wishlistItem.deleteMany({where:{productId:req.params.productId,wishlist:{userId:req.auth.sub}}});ok(res,{deleted:true});}catch(e){next(e);}});
+app.post('/api/discounts/validate', auth(), async(req,res,next)=>{try{const subtotal=Number(req.body.subtotal);const code=await prisma.discountCode.findUnique({where:{code:String(req.body.code).toUpperCase()}});const now=new Date();if(!code||!code.active||(code.startAt&&code.startAt>now)||(code.expiresAt&&code.expiresAt<now)||Number(code.minimumOrder||0)>subtotal)return fail(res,'کد تخفیف معتبر نیست');let amount=code.type==='PERCENT'?subtotal*Number(code.amount)/100:Number(code.amount);if(code.maximumDiscount)amount=Math.min(amount,Number(code.maximumDiscount));ok(res,{code:code.code,amount,finalTotal:Math.max(0,subtotal-amount)});}catch(e){next(e);}});
+app.post('/api/checkout', auth(), async(req,res,next)=>{try{const cart=await prisma.cart.findUnique({where:{userId:req.auth.sub},include:{items:{include:{product:true,variant:true}}}});if(!cart?.items.length)return fail(res,'سبد خرید خالی است');const address=await prisma.address.create({data:{userId:req.auth.sub,province:req.body.province,city:req.body.city,address:req.body.address,postalCode:req.body.postalCode}});const subtotal=cart.items.reduce((sum,i)=>sum+Number(i.variant?.price||i.product.price)*i.quantity,0);for(const item of cart.items)if(item.product.stock<item.quantity)return fail(res,`موجودی ${item.product.name} کافی نیست`,409);const shipping=req.body.shippingMethod==='EXPRESS'?250000:subtotal>=3000000?0:150000;const order=await prisma.$transaction(async tx=>{const stamp=Date.now(),created=await tx.order.create({data:{orderNumber:`MAYA-${stamp}`,invoiceNumber:`INV-${stamp}`,userId:req.auth.sub,addressId:address.id,subtotal,discount:0,shipping,total:subtotal+shipping,shippingMethod:req.body.shippingMethod||'STANDARD',items:{create:cart.items.map(i=>({productId:i.productId,productSnapshot:{name:i.product.name,sku:i.product.sku},variantSnapshot:i.variant?.attributes||undefined,quantity:i.quantity,unitPrice:i.variant?.price||i.product.price,discount:0}))}},include:{items:true}});for(const i of cart.items)await tx.product.update({where:{id:i.productId},data:{stock:{decrement:i.quantity}}});await tx.cartItem.deleteMany({where:{cartId:cart.id}});return created});ok(res,order,201);}catch(e){next(e);}});
+app.get('/api/orders', auth(), async(req,res,next)=>{try{ok(res,await prisma.order.findMany({where:req.auth.role==='ADMIN'?{}:{userId:req.auth.sub},include:{items:true,address:true},orderBy:{createdAt:'desc'}}));}catch(e){next(e);}});
+app.get('/api/orders/:id', auth(), async(req,res,next)=>{try{const order=await prisma.order.findFirst({where:{OR:[{id:req.params.id},{orderNumber:req.params.id}],...(req.auth.role!=='ADMIN'&&{userId:req.auth.sub})},include:{items:true,address:true}});order?ok(res,order):fail(res,'سفارش پیدا نشد',404);}catch(e){next(e);}});
+app.patch('/api/orders/:id/status', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.order.update({where:{id:req.params.id},data:{status:req.body.status,paymentStatus:req.body.paymentStatus}}));}catch(e){next(e);}});
+app.post('/api/products/:id/reviews', auth(), async(req,res,next)=>{try{const rating=Number(req.body.rating);if(!Number.isInteger(rating)||rating<1||rating>5||String(req.body.text||'').length<3)return fail(res,'نظر معتبر نیست');ok(res,await prisma.review.create({data:{userId:req.auth.sub,productId:req.params.id,rating,text:req.body.text}}),201);}catch(e){next(e);}});
+app.get('/api/admin/stats', auth(['ADMIN']), async(_req,res,next)=>{try{const [orders,products,customers,lowStock]=await prisma.$transaction([prisma.order.aggregate({_sum:{total:true},_count:true}),prisma.product.count(),prisma.user.count({where:{role:'USER'}}),prisma.product.count({where:{stock:{lte:5}}})]);ok(res,{sales:orders._sum.total||0,orders:orders._count,products,customers,lowStock});}catch(e){next(e);}});
+app.get('/api/admin/customers', auth(['ADMIN']), async(_req,res,next)=>{try{ok(res,await prisma.user.findMany({select:{id:true,firstName:true,lastName:true,email:true,mobile:true,role:true,active:true,createdAt:true,_count:{select:{orders:true}}},orderBy:{createdAt:'desc'}}));}catch(e){next(e);}});
+app.patch('/api/admin/customers/:id', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.user.update({where:{id:req.params.id},data:{active:req.body.active}}));}catch(e){next(e);}});
+app.get('/api/admin/discounts', auth(['ADMIN']), async(_req,res,next)=>{try{ok(res,await prisma.discountCode.findMany({orderBy:{createdAt:'desc'}}));}catch(e){next(e);}});
+app.post('/api/admin/discounts', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.discountCode.create({data:req.body}),201);}catch(e){next(e);}});
+app.put('/api/admin/discounts/:id', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.discountCode.update({where:{id:req.params.id},data:req.body}));}catch(e){next(e);}});
+app.delete('/api/admin/discounts/:id', auth(['ADMIN']), async(req,res,next)=>{try{await prisma.discountCode.delete({where:{id:req.params.id}});ok(res,{deleted:true});}catch(e){next(e);}});
+app.get('/api/sliders', async(_req,res,next)=>{try{ok(res,await prisma.slider.findMany({where:{active:true},orderBy:{order:'asc'}}));}catch(e){next(e);}});
+app.get('/api/admin/sliders', auth(['ADMIN']), async(_req,res,next)=>{try{ok(res,await prisma.slider.findMany({orderBy:{order:'asc'}}));}catch(e){next(e);}});
+app.post('/api/admin/sliders', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.slider.create({data:req.body}),201);}catch(e){next(e);}});
+app.put('/api/admin/sliders/:id', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.slider.update({where:{id:req.params.id},data:req.body}));}catch(e){next(e);}});
+app.delete('/api/admin/sliders/:id', auth(['ADMIN']), async(req,res,next)=>{try{await prisma.slider.delete({where:{id:req.params.id}});ok(res,{deleted:true});}catch(e){next(e);}});
+app.get('/api/admin/reviews', auth(['ADMIN']), async(_req,res,next)=>{try{ok(res,await prisma.review.findMany({include:{user:{select:{firstName:true,lastName:true}},product:{select:{name:true}}},orderBy:{createdAt:'desc'}}));}catch(e){next(e);}});
+app.patch('/api/admin/reviews/:id', auth(['ADMIN']), async(req,res,next)=>{try{ok(res,await prisma.review.update({where:{id:req.params.id},data:{approved:req.body.approved}}));}catch(e){next(e);}});
+app.delete('/api/admin/reviews/:id', auth(['ADMIN']), async(req,res,next)=>{try{await prisma.review.delete({where:{id:req.params.id}});ok(res,{deleted:true});}catch(e){next(e);}});
+app.post('/api/payments/mock/initiate', auth(), async(req,res)=>ok(res,{authority:`MOCK-${Date.now()}`,redirectUrl:`${process.env.FRONTEND_URL}/#payment-result?status=success`,amount:req.body.amount}));
+app.post('/api/payments/mock/verify', auth(), async(req,res)=>ok(res,{verified:req.body.status==='success',referenceId:req.body.status==='success'?`REF-${Date.now()}`:null}));
+app.use((_req,res)=>fail(res,'مسیر پیدا نشد',404));
+app.use((err,_req,res,_next)=>{console.error(err);fail(res,process.env.NODE_ENV==='production'?'خطای داخلی سرور':err.message,500);});
+if (process.env.NODE_ENV !== 'test') app.listen(Number(process.env.PORT)||4000,()=>console.log('Maya Azma API: http://localhost:'+(process.env.PORT||4000)));

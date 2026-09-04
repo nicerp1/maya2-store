@@ -1,0 +1,63 @@
+@base = http://localhost:4000/api
+@token = PUT_LOGIN_TOKEN_HERE
+
+### Health
+GET {{base}}/health
+
+### Register
+POST {{base}}/auth/register
+Content-Type: application/json
+
+{"firstName":"کاربر","lastName":"آزمایشی","email":"demo@example.com","mobile":"09121112233","password":"StrongPass123!"}
+
+### Login
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{"email":"admin@mayaazma.ir","password":"MayaAdmin123!"}
+
+### Products with search and pagination
+GET {{base}}/products?q=فلاسک&page=1&limit=12
+
+### Categories
+GET {{base}}/categories
+
+### Cart
+GET {{base}}/cart
+Authorization: Bearer {{token}}
+
+### Add cart item
+POST {{base}}/cart/items
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"productId":"PRODUCT_ID","quantity":2}
+
+### Wishlist
+POST {{base}}/wishlist
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"productId":"PRODUCT_ID"}
+
+### Validate discount
+POST {{base}}/discounts/validate
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"code":"MAYA10","subtotal":2500000}
+
+### Checkout
+POST {{base}}/checkout
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"province":"تهران","city":"تهران","address":"نشانی آزمایشی","postalCode":"1234567890","shippingMethod":"STANDARD"}
+
+### Orders
+GET {{base}}/orders
+Authorization: Bearer {{token}}
+
+### Admin stats
+GET {{base}}/admin/stats
+Authorization: Bearer {{token}}
