@@ -44,6 +44,38 @@ document.addEventListener('change', async event => {
   } catch (error) { notify(error.message, 'error'); }
 }, true);
 
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-admin-delete]');
+  if (!button || !hasSession() || state.user?.role !== 'ADMIN') return;
+  const [type, reference] = button.dataset.adminDelete.split(':');
+  if (!['product', 'category'].includes(type)) return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  if (!confirm('از حذف این مورد مطمئن هستید؟')) return;
+  try {
+    if (type === 'product') await adminApi(`/api/admin/products/${reference}`, { method: 'DELETE' });
+    else {
+      const categories = await refreshAdminCategories();
+      const category = categories.find(item => item.slug === reference);
+      if (!category) throw new Error('دسته‌بندی پیدا نشد');
+      await adminApi(`/api/admin/categories/${category.id}`, { method: 'DELETE' });
+    }
+    notify('حذف از دیتابیس انجام شد'); location.reload();
+  } catch (error) { notify(error.message || 'حذف انجام نشد', 'error'); }
+}, true);
+
+const faAdminStatus = { PENDING_PAYMENT:'در انتظار پرداخت', PAID:'پرداخت شده', PROCESSING:'در حال پردازش', PREPARING:'در حال آماده‌سازی', SHIPPED:'ارسال شده', DELIVERED:'تحویل شده', CANCELLED:'لغو شده' };
+async function renderPersistentOrders() {
+  if (!location.hash.startsWith('#admin?section=orders') || state.user?.role !== 'ADMIN' || !hasSession()) return;
+  try {
+    const orders = await adminApi('/api/orders');
+    const panel = document.querySelector('.admin-layout section.panel');
+    if (!panel) return;
+    panel.innerHTML = `<h2>مدیریت سفارش‌ها</h2>${orders.length ? `<table><thead><tr><th>شماره</th><th>مشتری</th><th>تاریخ</th><th>مبلغ</th><th>وضعیت</th><th>فاکتور</th></tr></thead><tbody>${orders.map(order => `<tr><td>${order.orderNumber}</td><td>${order.user?.firstName || '—'} ${order.user?.lastName || ''}</td><td>${new Date(order.createdAt).toLocaleDateString('fa-IR')}</td><td>${money(Number(order.total))}</td><td><select data-order-status="${order.orderNumber}">${Object.entries(faAdminStatus).map(([value,label]) => `<option value="${value}" ${order.status === value ? 'selected' : ''}>${label}</option>`).join('')}</select></td><td>${order.invoiceNumber}</td></tr>`).join('')}</tbody></table>` : '<div class="admin-empty">هنوز سفارشی ثبت نشده است.</div>'}`;
+  } catch (error) { notify(error.message, 'error'); }
+}
+window.addEventListener('hashchange', () => setTimeout(renderPersistentOrders, 0));
+setTimeout(renderPersistentOrders, 0);
+
 document.addEventListener('submit', async event => {
   const form = event.target;
   if (form?.id !== 'shopSettings' || !hasSession() || state.user?.role !== 'ADMIN') return;
