@@ -31,11 +31,11 @@ const siteSettingsSchema = z.object({ notice:z.string().min(2).max(120), phone:z
 app.get('/api/settings', async (_req,res,next)=>{try{const row=await prisma.siteSetting.findUnique({where:{key:'general'}});ok(res,row?.value||{});}catch(e){next(e);}});
 app.put('/api/admin/settings', auth(['ADMIN']), async(req,res,next)=>{try{const parsed=siteSettingsSchema.safeParse(req.body);if(!parsed.success)return fail(res,'اطلاعات تنظیمات معتبر نیست');const row=await prisma.siteSetting.upsert({where:{key:'general'},create:{key:'general',value:parsed.data},update:{value:parsed.data}});ok(res,row.value);}catch(e){next(e);}});
 app.post('/api/auth/register', async (req, res, next) => { try {
-  const { firstName, lastName, email, mobile, password } = req.body;
-  if (!firstName || !lastName || !email || !mobile || !password || password.length < 8) return fail(res, 'اطلاعات ثبت‌نام معتبر نیست');
-  const user = await prisma.user.create({ data: { firstName, lastName, email: email.toLowerCase(), mobile, passwordHash: await bcrypt.hash(password, 12), cart: { create: {} }, wishlist: { create: {} } }, select: { id:true, firstName:true, lastName:true, email:true, role:true } });
+  const firstName=String(req.body.firstName||'').trim(), lastName=String(req.body.lastName||'').trim(), email=String(req.body.email||'').trim().toLowerCase(), mobile=String(req.body.mobile||'').replace(/[۰-۹]/g,d=>'0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)]).replace(/\s|-/g,''), password=String(req.body.password||'');
+  if (!firstName || !lastName || !/^\S+@\S+\.\S+$/.test(email) || !/^09\d{9}$/.test(mobile) || password.length < 8) return fail(res, 'اطلاعات ثبت‌نام معتبر نیست');
+  const user = await prisma.user.create({ data: { firstName, lastName, email, mobile, passwordHash: await bcrypt.hash(password, 12), cart: { create: {} }, wishlist: { create: {} } }, select: { id:true, firstName:true, lastName:true, email:true, role:true } });
   return ok(res, { user, token: tokenFor(user) }, 201);
-} catch (e) { next(e); } });
+} catch (e) { if(e?.code==='P2002') return fail(res,'این ایمیل یا شماره موبایل قبلاً ثبت شده است',409); next(e); } });
 app.post('/api/auth/login', async (req, res, next) => { try {
   const user = await prisma.user.findUnique({ where: { email: String(req.body.email).toLowerCase() } });
   if (!user || !user.active || !(await bcrypt.compare(req.body.password || '', user.passwordHash))) return fail(res, 'ایمیل یا رمز عبور نادرست است', 401);
