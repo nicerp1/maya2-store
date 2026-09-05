@@ -10,9 +10,10 @@ module.exports = async (req, res) => {
   if (!process.env.JWT_SECRET && process.env.MAYA_JWT_SECRET) {
     process.env.JWT_SECRET = process.env.MAYA_JWT_SECRET;
   }
-  if (!process.env.JWT_SECRET && process.env.SUPABASE_SECRET_KEY) {
+  const signingMaterial = process.env.MAYA_DATABASE_URL || process.env.SUPABASE_SECRET_KEY;
+  if (!process.env.JWT_SECRET && signingMaterial) {
     process.env.JWT_SECRET = createHash('sha256')
-      .update(`maya-azma-jwt:${process.env.SUPABASE_SECRET_KEY}`)
+      .update(`maya-azma-jwt:${signingMaterial}`)
       .digest('hex');
   }
   appPromise ||= import('../backend/src/app.js').then(({ app }) => app);
