@@ -8,7 +8,7 @@ document.addEventListener('submit', async (event) => {
   const registering = form.dataset.mode === 'register';
   const endpoint = registering ? '/api/auth/register' : '/api/auth/login';
   const payload = registering
-    ? { firstName: values.firstName?.trim(), lastName: values.lastName?.trim(), email: values.email?.trim(), password: values.password }
+    ? { firstName: values.firstName?.trim(), lastName: values.lastName?.trim(), mobile: values.mobile?.trim(), email: values.email?.trim(), password: values.password }
     : { email: values.email?.trim(), password: values.password };
   try {
     const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -23,4 +23,18 @@ document.addEventListener('submit', async (event) => {
     updateBadges();
     location.hash = state.user.role === 'ADMIN' ? 'admin' : 'account';
   } catch (error) { notify(error.message || 'ارتباط با سرور برقرار نشد', 'error'); }
+}, true);
+
+/* The original account template pre-dates real registration. Add its required
+   mobile field only when the user selects the registration tab. */
+document.addEventListener('click', event => {
+  const tab = event.target.closest('[data-auth-tab]');
+  if (!tab) return;
+  setTimeout(() => {
+    const fields = document.querySelector('#nameFields');
+    if (!fields) return;
+    let mobile = fields.querySelector('[name="mobile"]');
+    if (!mobile) { fields.insertAdjacentHTML('beforeend', '<div class="field full"><label>شماره موبایل</label><input name="mobile" inputmode="tel" pattern="09[0-9]{9}" placeholder="09123456789"></div>'); mobile = fields.querySelector('[name="mobile"]'); }
+    mobile.required = tab.dataset.authTab === 'register';
+  }, 0);
 }, true);
