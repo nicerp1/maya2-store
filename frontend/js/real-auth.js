@@ -4,26 +4,35 @@ document.addEventListener('submit', async (event) => {
   if (form?.id !== 'authForm') return;
   event.preventDefault();
   event.stopImmediatePropagation();
+  if (form.dataset.busy) return;
   const values = Object.fromEntries(new FormData(form));
   const registering = form.dataset.mode === 'register';
   const endpoint = registering ? '/api/auth/register' : '/api/auth/login';
   const payload = registering
     ? { firstName: values.firstName?.trim(), lastName: values.lastName?.trim(), mobile: values.mobile?.trim(), email: values.email?.trim(), password: values.password }
     : { email: values.email?.trim(), password: values.password };
+  form.dataset.busy = 'true';
+  const submit = form.querySelector('button');
+  if (submit) submit.disabled = true;
   try {
     const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const result = await response.json();
     if (!response.ok || !result.success) throw new Error(result.message || 'ورود انجام نشد');
     const session = result.data;
+    const previousId = state.user?.id;
+    if (previousId && previousId !== session.user.id) state.cart = [];
+    state.orders = [];
     localStorage.setItem('maya-token', session.token);
     state.user = session.user;
     localStorage.setItem('maya-user', JSON.stringify(state.user));
-    await window.syncPersistentCart?.();
-    await window.syncPersistentOrders?.();
+    save();
+    window.syncPersistentCart?.().catch(() => {});
+    window.syncPersistentOrders?.();
     notify(registering ? 'حساب کاربری با موفقیت ساخته شد' : 'با موفقیت وارد شدید');
     updateBadges();
     location.hash = state.user.role === 'ADMIN' ? 'admin' : 'account';
   } catch (error) { notify(error.message || 'ارتباط با سرور برقرار نشد', 'error'); }
+  finally { delete form.dataset.busy; if (submit) submit.disabled = false; }
 }, true);
 
 /* The original account template pre-dates real registration. Add its required

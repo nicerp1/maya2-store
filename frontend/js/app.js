@@ -467,57 +467,14 @@ function bindPage() {
         $("#authForm").dataset.mode = reg ? "register" : "login";
       }),
   );
-  $("#authForm")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const d = Object.fromEntries(new FormData(e.target));
-    const admin = d.email.toLowerCase() === "admin@mayaazma.ir";
-    state.user = {
-      firstName: d.firstName || (admin ? "مدیر" : "کاربر"),
-      lastName: d.lastName || "",
-      email: d.email,
-      role: admin ? "ADMIN" : "USER",
-    };
-    localStorage.setItem("maya-user", JSON.stringify(state.user));
-    notify("با موفقیت وارد شدید");
-    updateBadges();
-    location.hash = admin ? "admin" : "account";
-  });
+  // Authentication is handled by real-auth.js.
   $("#logout")?.addEventListener("click", () => {
     state.user = null;
     localStorage.removeItem("maya-user");
     updateBadges();
     render();
   });
-  $("#checkoutForm")?.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const token = localStorage.getItem("maya-token");
-    if (!token || typeof mayaApi !== "function") {
-      notify("برای ثبت سفارش واقعی، ابتدا وارد حساب کاربری شوید", "error");
-      location.hash = "account";
-      return;
-    }
-    const values = Object.fromEntries(new FormData(e.currentTarget));
-    try {
-      await window.syncPersistentCart?.();
-      const order = await mayaApi("/api/checkout", {
-        method: "POST",
-        body: JSON.stringify({
-          province: values.province,
-          city: values.city,
-          address: values.address,
-          postalCode: values.postal,
-          shippingMethod: values.shipping === "اکسپرس" ? "EXPRESS" : "STANDARD",
-        }),
-      });
-      state.orders.unshift({ number: order.orderNumber, date: new Date(order.createdAt).toLocaleDateString("fa-IR"), total: Number(order.total), status: order.status, items: [...state.cart] });
-      state.cart = [];
-      save();
-      notify("سفارش و فاکتور با موفقیت ثبت شد");
-      location.hash = "tracking?id=" + encodeURIComponent(order.orderNumber);
-    } catch (error) {
-      notify(error.message || "ثبت سفارش انجام نشد", "error");
-    }
-  });
+  // Checkout is handled by real-commerce.js.
   $("#cardNumber")?.addEventListener("input", (e) => {
     e.target.value = e.target.value
       .replace(/\D/g, "")

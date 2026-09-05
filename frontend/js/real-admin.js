@@ -35,13 +35,17 @@ document.addEventListener('submit', async event => {
 document.addEventListener('change', async event => {
   const select = event.target.closest('[data-order-status]');
   if (!select || !hasSession() || state.user?.role !== 'ADMIN') return;
+  event.stopImmediatePropagation();
+  select.disabled = true;
   try {
     const orders = await adminApi('/api/orders');
     const order = orders.find(item => item.orderNumber === select.dataset.orderStatus);
     if (!order) return;
     await adminApi(`/api/orders/${order.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: select.value }) });
+    await window.syncPersistentOrders?.(true);
     notify('وضعیت سفارش در دیتابیس به‌روزرسانی شد');
   } catch (error) { notify(error.message, 'error'); }
+  finally { select.disabled = false; }
 }, true);
 
 document.addEventListener('click', async event => {
