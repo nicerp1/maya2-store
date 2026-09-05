@@ -15,7 +15,14 @@ async function syncPersistentCart() {
   try {
     const cart = await mayaApi('/api/cart');
     const items = cart?.items || [];
-    if (!items.length && state.cart.length) return;
+    if (!items.length && state.cart.length) {
+      for (const localItem of state.cart) {
+        const saved = await mayaApi('/api/cart/items', { method: 'POST', body: JSON.stringify({ productId: localItem.id, quantity: localItem.qty }) });
+        localItem.remoteId = saved.id;
+      }
+      save();
+      return;
+    }
     state.cart = items.map(item => ({ id: item.productId, qty: item.quantity, variant: item.variant?.name || '۱ عدد', remoteId: item.id }));
     save();
   } catch (_) { /* The local cart remains an offline fallback. */ }
@@ -54,8 +61,13 @@ document.addEventListener('click', async event => {
 
 document.addEventListener('submit', async event => {
   const form = event.target;
-  if (form?.id !== 'checkoutForm' || !hasSession()) return;
+  if (form?.id !== 'checkoutForm') return;
   event.preventDefault(); event.stopImmediatePropagation();
+  if (!hasSession()) {
+    notify('برای ثبت سفارش واقعی، ابتدا وارد حساب کاربری شوید', 'error');
+    location.hash = 'account';
+    return;
+  }
   const values = Object.fromEntries(new FormData(form));
   try {
     const order = await mayaApi('/api/checkout', { method: 'POST', body: JSON.stringify({ province: values.province, city: values.city, address: values.address, postalCode: values.postal, shippingMethod: values.shipping === 'اکسپرس' ? 'EXPRESS' : 'STANDARD' }) });
@@ -65,4 +77,5 @@ document.addEventListener('submit', async event => {
 }, true);
 
 document.addEventListener('click', event => { if (event.target.closest('#logout')) localStorage.removeItem('maya-token'); }, true);
+window.syncPersistentCart = syncPersistentCart;
 syncPersistentCart();
