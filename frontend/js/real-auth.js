@@ -19,6 +19,7 @@ document.addEventListener('submit', async (event) => {
     state.user = session.user;
     localStorage.setItem('maya-user', JSON.stringify(state.user));
     await window.syncPersistentCart?.();
+    await window.syncPersistentOrders?.();
     notify(registering ? 'حساب کاربری با موفقیت ساخته شد' : 'با موفقیت وارد شدید');
     updateBadges();
     location.hash = state.user.role === 'ADMIN' ? 'admin' : 'account';

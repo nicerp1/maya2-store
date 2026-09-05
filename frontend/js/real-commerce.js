@@ -28,6 +28,27 @@ async function syncPersistentCart() {
   } catch (_) { /* The local cart remains an offline fallback. */ }
 }
 
+async function syncPersistentOrders(shouldRender = false) {
+  if (!hasSession()) return;
+  try {
+    const orders = await mayaApi('/api/orders');
+    state.orders = orders.map(order => ({
+      id: order.id,
+      number: order.orderNumber,
+      invoiceNumber: order.invoiceNumber,
+      date: new Date(order.createdAt).toLocaleDateString('fa-IR'),
+      time: new Date(order.createdAt).toLocaleTimeString('fa-IR', { hour:'2-digit', minute:'2-digit' }),
+      status: order.status,
+      total: Number(order.total),
+      customer: { ...(order.user || {}), ...(order.address || {}) },
+      invoiceItems: (order.items || []).map(item => ({ name:item.productSnapshot?.name || 'محصول', sku:item.productSnapshot?.sku || '', quantity:item.quantity, unitPrice:Number(item.unitPrice), discount:Number(item.discount || 0) })),
+      invoice: { subtotal:Number(order.subtotal), discount:Number(order.discount || 0), shipping:Number(order.shipping || 0), total:Number(order.total) }
+    }));
+    save();
+    if (shouldRender && /#(?:orders|invoice|admin)/.test(location.hash)) render();
+  } catch (_) { /* Keep the last available order snapshot while offline. */ }
+}
+
 document.addEventListener('click', async event => {
   const addButton = event.target.closest('[data-add]');
   const removeButton = event.target.closest('[data-remove]');
@@ -38,25 +59,35 @@ document.addEventListener('click', async event => {
     event.preventDefault(); event.stopImmediatePropagation();
     const productId = addButton.dataset.add;
     const quantity = Number(document.querySelector('#detailQty')?.textContent || 1);
+    const snapshot = state.cart.map(item => ({ ...item }));
+    const localItem = state.cart.find(entry => entry.id === productId);
+    if (localItem) localItem.qty += quantity;
+    else state.cart.push({ id: productId, qty: quantity, variant: '۱ عدد' });
+    save(); notify('محصول به سبد خرید افزوده شد');
     try {
       const remoteItem = await mayaApi('/api/cart/items', { method: 'POST', body: JSON.stringify({ productId, quantity }) });
       const item = state.cart.find(entry => entry.id === productId);
-      if (item) { item.qty += quantity; item.remoteId = remoteItem.id; } else state.cart.push({ id: productId, qty: quantity, variant: '۱ عدد', remoteId: remoteItem.id });
-      save(); notify('محصول به سبد خرید افزوده شد');
-    } catch (error) { notify(error.message, 'error'); }
+      if (item) item.remoteId = remoteItem.id;
+      save();
+    } catch (error) { state.cart = snapshot; save(); render(); notify(error.message, 'error'); }
     return;
   }
 
   const [productId, direction] = (removeButton ? `${removeButton.dataset.remove}:remove` : quantityButton.dataset.cartqty).split(':');
   const item = state.cart.find(entry => entry.id === productId);
-  if (!item?.remoteId) return;
+  if (!item) return;
   event.preventDefault(); event.stopImmediatePropagation();
+  const snapshot = state.cart.map(entry => ({ ...entry }));
+  const nextQuantity = direction === 'up' ? item.qty + 1 : item.qty - 1;
+  if (direction === 'remove' || nextQuantity < 1) state.cart = state.cart.filter(entry => entry.id !== productId);
+  else item.qty = nextQuantity;
+  save(); render();
   try {
-    const nextQuantity = direction === 'up' ? item.qty + 1 : item.qty - 1;
-    if (direction === 'remove' || nextQuantity < 1) { await mayaApi(`/api/cart/items/${item.remoteId}`, { method: 'DELETE' }); state.cart = state.cart.filter(entry => entry.id !== productId); }
-    else { await mayaApi(`/api/cart/items/${item.remoteId}`, { method: 'PATCH', body: JSON.stringify({ quantity: nextQuantity }) }); item.qty = nextQuantity; }
-    save(); render();
-  } catch (error) { notify(error.message, 'error'); }
+    let remoteId = item.remoteId;
+    if (!remoteId && direction !== 'remove') { await syncPersistentCart(); remoteId = state.cart.find(entry => entry.id === productId)?.remoteId; }
+    if (remoteId && (direction === 'remove' || nextQuantity < 1)) await mayaApi(`/api/cart/items/${remoteId}`, { method: 'DELETE' });
+    else if (remoteId) await mayaApi(`/api/cart/items/${remoteId}`, { method: 'PATCH', body: JSON.stringify({ quantity: nextQuantity }) });
+  } catch (error) { state.cart = snapshot; save(); render(); notify(error.message, 'error'); }
 }, true);
 
 document.addEventListener('submit', async event => {
@@ -78,4 +109,7 @@ document.addEventListener('submit', async event => {
 
 document.addEventListener('click', event => { if (event.target.closest('#logout')) localStorage.removeItem('maya-token'); }, true);
 window.syncPersistentCart = syncPersistentCart;
+window.syncPersistentOrders = syncPersistentOrders;
 syncPersistentCart();
+syncPersistentOrders(true);
+window.addEventListener('hashchange', () => syncPersistentOrders(true));
