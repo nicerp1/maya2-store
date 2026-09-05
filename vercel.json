@@ -4,7 +4,9 @@
   "outputDirectory": "frontend",
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/api/health", "destination": "/api/health" },
+    { "source": "/api/catalog", "destination": "/api/catalog" },
+    { "source": "/api/(.*)", "destination": "/api/[...path]" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
