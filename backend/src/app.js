@@ -92,5 +92,5 @@ app.delete('/api/admin/reviews/:id', auth(['ADMIN']), async(req,res,next)=>{try{
 app.post('/api/payments/mock/initiate', auth(), async(req,res)=>ok(res,{authority:`MOCK-${Date.now()}`,redirectUrl:`${process.env.FRONTEND_URL}/#payment-result?status=success`,amount:req.body.amount}));
 app.post('/api/payments/mock/verify', auth(), async(req,res)=>ok(res,{verified:req.body.status==='success',referenceId:req.body.status==='success'?`REF-${Date.now()}`:null}));
 app.use((_req,res)=>fail(res,'مسیر پیدا نشد',404));
-app.use((err,_req,res,_next)=>{console.error(err);res.setHeader('X-Maya-Error-Type',err?.name||'Error');fail(res,process.env.NODE_ENV==='production'?'خطای داخلی سرور':err.message,500);});
+app.use((err,_req,res,_next)=>{console.error(err);fail(res,process.env.NODE_ENV==='production'?'خطای داخلی سرور':err.message,500);});
 if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) app.listen(Number(process.env.PORT)||4000,()=>console.log('Maya Azma API: http://localhost:'+(process.env.PORT||4000)));
