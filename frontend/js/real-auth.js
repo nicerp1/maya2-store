@@ -48,3 +48,35 @@ document.addEventListener('click', event => {
     mobile.required = tab.dataset.authTab === 'register';
   }, 0);
 }, true);
+async function restoreRealSession() {
+  const token = localStorage.getItem('maya-token');
+  if (!token) {
+    if (state.user) {
+      state.user = null; state.cart = []; state.orders = [];
+      localStorage.removeItem('maya-user'); save();
+    }
+    if (location.hash.startsWith('#admin')) {
+      notify('برای ورود به پنل، دوباره با حساب مدیر وارد شوید', 'error');
+      location.hash = 'account';
+    }
+    return;
+  }
+  try {
+    const response = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+    const result = await response.json();
+    if (!response.ok || !result.success) throw new Error(result.message || 'نشست نامعتبر است');
+    state.user = result.data;
+    localStorage.setItem('maya-user', JSON.stringify(state.user));
+    updateBadges();
+    if (location.hash.startsWith('#admin')) {
+      if (state.user.role !== 'ADMIN') location.hash = 'account';
+      else { render(); window.syncPersistentOrders?.(true); }
+    }
+  } catch (_) {
+    localStorage.removeItem('maya-token'); localStorage.removeItem('maya-user');
+    state.user = null; state.cart = []; state.orders = []; save();
+    notify('نشست منقضی شده؛ دوباره وارد شوید', 'error');
+    location.hash = 'account';
+  }
+}
+restoreRealSession();
