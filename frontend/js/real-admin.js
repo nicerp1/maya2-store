@@ -68,16 +68,25 @@ document.addEventListener('click', async event => {
 }, true);
 
 const faAdminStatus = { PENDING_PAYMENT:'در انتظار پرداخت', PAID:'پرداخت شده', PROCESSING:'در حال پردازش', PREPARING:'در حال آماده‌سازی', SHIPPED:'ارسال شده', DELIVERED:'تحویل شده', CANCELLED:'لغو شده' };
+let ordersRequest = 0;
 async function renderPersistentOrders() {
   if (!location.hash.startsWith('#admin?section=orders') || state.user?.role !== 'ADMIN' || !hasSession()) return;
+  const request = ++ordersRequest;
   try {
     const orders = await adminApi('/api/orders');
-    const panel = document.querySelector('.admin-layout section.panel');
-    if (!panel) return;
-    panel.innerHTML = `<h2>مدیریت سفارش‌ها</h2>${orders.length ? `<table><thead><tr><th>شماره</th><th>مشتری</th><th>تاریخ</th><th>مبلغ</th><th>وضعیت</th><th>فاکتور</th></tr></thead><tbody>${orders.map(order => `<tr><td>${order.orderNumber}</td><td>${order.user?.firstName || '—'} ${order.user?.lastName || ''}</td><td>${new Date(order.createdAt).toLocaleDateString('fa-IR')}</td><td>${money(Number(order.total))}</td><td><select data-order-status="${order.orderNumber}">${Object.entries(faAdminStatus).map(([value,label]) => `<option value="${value}" ${order.status === value ? 'selected' : ''}>${label}</option>`).join('')}</select></td><td>${order.invoiceNumber}</td></tr>`).join('')}</tbody></table>` : '<div class="admin-empty">هنوز سفارشی ثبت نشده است.</div>'}`;
+    if (request !== ordersRequest || !location.hash.startsWith('#admin?section=orders')) return;
+    const host = document.querySelector('.admin-layout > section');
+    if (!host) return;
+    host.classList.add('panel');
+    host.innerHTML = `<div class="admin-toolbar"><div><h2>مدیریت سفارش‌ها</h2><small>${orders.length} سفارش واقعی · آخرین بروزرسانی ${new Date().toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'})}</small></div><button class="btn outline" data-refresh-orders>بروزرسانی</button></div>${orders.length ? `<table><thead><tr><th>شماره</th><th>مشتری</th><th>تاریخ</th><th>مبلغ</th><th>وضعیت</th><th>فاکتور</th></tr></thead><tbody>${orders.map(order => `<tr><td>${order.orderNumber}</td><td>${order.user?.firstName || '—'} ${order.user?.lastName || ''}<small style="display:block">${order.user?.email || ''}</small></td><td>${new Date(order.createdAt).toLocaleDateString('fa-IR')}</td><td>${money(Number(order.total))}</td><td><select data-order-status="${order.orderNumber}">${Object.entries(faAdminStatus).map(([value,label]) => `<option value="${value}" ${order.status === value ? 'selected' : ''}>${label}</option>`).join('')}</select></td><td><a href="#invoice?number=${encodeURIComponent(order.invoiceNumber || order.orderNumber)}">${order.invoiceNumber || 'مشاهده'}</a></td></tr>`).join('')}</tbody></table>` : '<div class="admin-empty">هنوز سفارشی ثبت نشده است.</div>'}`;
+    if (window.lucide) lucide.createIcons();
   } catch (error) { notify(error.message, 'error'); }
 }
 window.addEventListener('hashchange', () => setTimeout(renderPersistentOrders, 0));
+window.addEventListener('focus', renderPersistentOrders);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) renderPersistentOrders(); });
+document.addEventListener('click', event => { if (event.target.closest('[data-refresh-orders]')) renderPersistentOrders(); });
+setInterval(() => { if (location.hash.startsWith('#admin?section=orders')) renderPersistentOrders(); }, 15000);
 setTimeout(renderPersistentOrders, 0);
 
 document.addEventListener('submit', async event => {

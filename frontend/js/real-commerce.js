@@ -154,3 +154,6 @@ syncPersistentOrders(true);
 window.addEventListener('hashchange', () => {
   if (/^#(orders|invoice|tracking|admin|account)/.test(location.hash)) syncPersistentOrders(true);
 });
+window.addEventListener('focus', () => {
+  if (/^#(orders|invoice|tracking|admin|account)/.test(location.hash)) syncPersistentOrders(true);
+});
