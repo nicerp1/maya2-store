@@ -41,6 +41,6 @@ module.exports = async (req, res) => {
     const rows = await seedProductsIfEmpty(await result.json());
     return json(res, 200, { connected: true, products: rows.map((row) => row.payload) });
   } catch (error) {
-    return json(res, 503, { connected: false, error: 'Database is temporarily unavailable.' });
+    return json(res, 503, { connected: false, error: 'Database is temporarily unavailable.', reason: error.message });
   }
 };
