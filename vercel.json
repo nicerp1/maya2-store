@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "",
+  "buildCommand": "npx prisma generate --schema=backend/prisma/schema.prisma",
   "outputDirectory": "frontend",
   "cleanUrls": true,
   "rewrites": [
