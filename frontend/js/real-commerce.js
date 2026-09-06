@@ -1,11 +1,10 @@
 /* Persistent commerce bridge. Signed-in customers use the database-backed cart and checkout API. */
 const mayaApi = async (path, options = {}) => {
-  const token = localStorage.getItem('maya-token');
-  if (!token) throw new Error('برای ادامه ابتدا وارد حساب کاربری شوید');
-  const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
+  if (!state.user) throw new Error('برای ادامه ابتدا وارد حساب کاربری شوید');
+  const response = await fetch(path, { credentials:'include', ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
   const result = await response.json().catch(() => ({}));
-  if (response.status === 401 && localStorage.getItem('maya-token') === token) {
-    localStorage.removeItem('maya-token'); localStorage.removeItem('maya-user');
+  if (response.status === 401) {
+    localStorage.removeItem('maya-user');
     state.user = null; state.cart = []; state.orders = []; save();
     throw new Error('نشست شما منقضی شده؛ دوباره وارد شوید');
   }
@@ -13,7 +12,7 @@ const mayaApi = async (path, options = {}) => {
   return result.data;
 };
 
-const hasSession = () => Boolean(localStorage.getItem('maya-token'));
+const hasSession = () => Boolean(state.user);
 const pendingCart = new Map();
 let checkoutBusy = false;
 function cartBusy(id) { return pendingCart.has(id); }
@@ -31,10 +30,10 @@ async function cartRequest(id, work) {
 
 async function syncPersistentCart() {
   if (!hasSession()) return;
-  const token = localStorage.getItem('maya-token');
+  const userId = state.user?.id;
   try {
     const cart = await mayaApi('/api/cart');
-    if (localStorage.getItem('maya-token') !== token) return;
+    if (state.user?.id !== userId) return;
     const items = cart?.items || [];
     if (!items.length && state.cart.length) {
       for (const localItem of state.cart) {
@@ -51,10 +50,10 @@ async function syncPersistentCart() {
 
 async function syncPersistentOrders(shouldRender = false) {
   if (!hasSession()) return;
-  const token = localStorage.getItem('maya-token');
+  const userId = state.user?.id;
   try {
     const orders = await mayaApi('/api/orders');
-    if (localStorage.getItem('maya-token') !== token) return;
+    if (state.user?.id !== userId) return;
     state.orders = orders.map(order => ({
       id: order.id,
       number: order.orderNumber,
@@ -141,10 +140,11 @@ document.addEventListener('submit', async event => {
   finally { checkoutBusy = false; if (submit) { submit.disabled = false; submit.textContent = 'ثبت سفارش'; } }
 }, true);
 
-document.addEventListener('click', event => {
+document.addEventListener('click', async event => {
   if (!event.target.closest('#logout')) return;
   event.preventDefault(); event.stopImmediatePropagation();
-  localStorage.removeItem('maya-token'); localStorage.removeItem('maya-user');
+  await fetch('/api/auth/logout',{method:'POST',credentials:'include'}).catch(()=>{});
+  localStorage.removeItem('maya-user');
   state.user = null; state.cart = []; state.orders = []; save(); location.hash = 'account'; render();
 }, true);
 window.syncPersistentCart = syncPersistentCart;

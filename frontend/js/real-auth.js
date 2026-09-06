@@ -1,82 +1,34 @@
-/* Real account access: the capture listener replaces the old local-only form handler. */
-document.addEventListener('submit', async (event) => {
-  const form = event.target;
-  if (form?.id !== 'authForm') return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  if (form.dataset.busy) return;
-  const values = Object.fromEntries(new FormData(form));
-  const registering = form.dataset.mode === 'register';
-  const endpoint = registering ? '/api/auth/register' : '/api/auth/login';
-  const payload = registering
-    ? { firstName: values.firstName?.trim(), lastName: values.lastName?.trim(), mobile: values.mobile?.trim(), email: values.email?.trim(), password: values.password }
-    : { email: values.email?.trim(), password: values.password };
-  form.dataset.busy = 'true';
-  const submit = form.querySelector('button');
-  if (submit) submit.disabled = true;
-  try {
-    const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    const result = await response.json();
-    if (!response.ok || !result.success) throw new Error(result.message || 'ورود انجام نشد');
-    const session = result.data;
-    const previousId = state.user?.id;
-    if (previousId && previousId !== session.user.id) state.cart = [];
-    state.orders = [];
-    localStorage.setItem('maya-token', session.token);
-    state.user = session.user;
-    localStorage.setItem('maya-user', JSON.stringify(state.user));
-    save();
-    window.syncPersistentCart?.().catch(() => {});
-    window.syncPersistentOrders?.(true);
-    notify(registering ? 'حساب کاربری با موفقیت ساخته شد' : 'با موفقیت وارد شدید');
-    updateBadges();
-    location.hash = state.user.role === 'ADMIN' ? 'admin' : 'account';
-  } catch (error) { notify(error.message || 'ارتباط با سرور برقرار نشد', 'error'); }
-  finally { delete form.dataset.busy; if (submit) submit.disabled = false; }
-}, true);
+/* Database-backed authentication. The session token is kept only in a secure HttpOnly cookie. */
+const faDigitsToEn = value => String(value || '').replace(/[۰-۹]/g, digit => '0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)]);
+const authRequest = async (path, options = {}) => {
+  const response = await fetch(path, { credentials:'include', ...options, headers:{ 'Content-Type':'application/json', ...(options.headers || {}) } });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.success) throw new Error(result.message || 'ارتباط امن با سرور برقرار نشد');
+  return result.data;
+};
+const setAuthError = (form, field, message = '') => { const input=form.elements[field], target=form.querySelector(`#${field}Error`); if(input) input.setAttribute('aria-invalid',String(Boolean(message))); if(target) target.textContent=message; };
+const acceptSession = (user, message) => { const previousId=state.user?.id;if(previousId&&previousId!==user.id)state.cart=[];state.user=user;state.orders=[];localStorage.setItem('maya-user',JSON.stringify(user));save();updateBadges();window.syncPersistentCart?.().catch(()=>{});window.syncPersistentOrders?.(true);notify(message);location.hash=user.role==='ADMIN'?'admin':'account';render(); };
+window.mayaAcceptSession=acceptSession;
 
-/* The original account template pre-dates real registration. Add its required
-   mobile field only when the user selects the registration tab. */
-document.addEventListener('click', event => {
-  const tab = event.target.closest('[data-auth-tab]');
-  if (!tab) return;
-  setTimeout(() => {
-    const fields = document.querySelector('#nameFields');
-    if (!fields) return;
-    let mobile = fields.querySelector('[name="mobile"]');
-    if (!mobile) { fields.insertAdjacentHTML('beforeend', '<div class="field full"><label>شماره موبایل</label><input name="mobile" inputmode="tel" pattern="09[0-9]{9}" placeholder="09123456789"></div>'); mobile = fields.querySelector('[name="mobile"]'); }
-    mobile.required = tab.dataset.authTab === 'register';
-  }, 0);
-}, true);
-async function restoreRealSession() {
-  const token = localStorage.getItem('maya-token');
-  if (!token) {
-    if (state.user) {
-      state.user = null; state.cart = []; state.orders = [];
-      localStorage.removeItem('maya-user'); save();
-    }
-    if (location.hash.startsWith('#admin')) {
-      notify('برای ورود به پنل، دوباره با حساب مدیر وارد شوید', 'error');
-      location.hash = 'account';
-    }
-    return;
-  }
-  try {
-    const response = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
-    const result = await response.json();
-    if (!response.ok || !result.success) throw new Error(result.message || 'نشست نامعتبر است');
-    state.user = result.data;
-    localStorage.setItem('maya-user', JSON.stringify(state.user));
-    updateBadges();
-    if (location.hash.startsWith('#admin')) {
-      if (state.user.role !== 'ADMIN') location.hash = 'account';
-      else { render(); window.syncPersistentOrders?.(true); }
-    }
-  } catch (_) {
-    localStorage.removeItem('maya-token'); localStorage.removeItem('maya-user');
-    state.user = null; state.cart = []; state.orders = []; save();
-    notify('نشست منقضی شده؛ دوباره وارد شوید', 'error');
-    location.hash = 'account';
-  }
+function validateAuth(form,registering){
+  ['firstName','lastName','mobile','identifier','password'].forEach(name=>setAuthError(form,name));let valid=true;const values=Object.fromEntries(new FormData(form));const identifier=faDigitsToEn(values.identifier).trim().toLowerCase();
+  if(registering&&!/^\S+@\S+\.\S+$/.test(identifier)){setAuthError(form,'identifier','یک ایمیل معتبر وارد کنید.');valid=false;}
+  if(!registering&&!(/^\S+@\S+\.\S+$/.test(identifier)||/^09\d{9}$/.test(identifier.replace(/\s|-/g,'')))){setAuthError(form,'identifier','ایمیل یا شماره موبایل معتبر وارد کنید.');valid=false;}
+  if(String(values.password||'').length<8){setAuthError(form,'password','رمز عبور باید حداقل ۸ نویسه باشد.');valid=false;}
+  if(registering){if(!String(values.firstName||'').trim()){setAuthError(form,'firstName','نام را وارد کنید.');valid=false;}if(!String(values.lastName||'').trim()){setAuthError(form,'lastName','نام خانوادگی را وارد کنید.');valid=false;}if(!/^09\d{9}$/.test(faDigitsToEn(values.mobile).replace(/\s|-/g,''))){setAuthError(form,'mobile','شماره موبایل باید ۱۱ رقمی و با ۰۹ شروع شود.');valid=false;}}
+  form.querySelector('[aria-invalid=true]')?.focus();return valid;
 }
-restoreRealSession();
+document.addEventListener('submit',async event=>{
+  const form=event.target;if(form?.id!=='authForm')return;event.preventDefault();event.stopImmediatePropagation();if(form.dataset.busy)return;const registering=form.dataset.mode==='register';if(!validateAuth(form,registering))return;
+  const values=Object.fromEntries(new FormData(form));const payload=registering?{firstName:values.firstName.trim(),lastName:values.lastName.trim(),mobile:faDigitsToEn(values.mobile).replace(/\s|-/g,''),email:values.identifier.trim(),password:values.password,remember:Boolean(values.remember)}:{identifier:faDigitsToEn(values.identifier).trim(),password:values.password,remember:Boolean(values.remember)};
+  const submit=form.querySelector('.auth-submit'),status=form.querySelector('#authStatus');form.dataset.busy='true';form.setAttribute('aria-busy','true');submit.disabled=true;submit.setAttribute('aria-busy','true');submit.querySelector('span').textContent=registering?'در حال ساخت حساب…':'در حال ورود…';status.textContent='';
+  try{const session=await authRequest(registering?'/api/auth/register':'/api/auth/login',{method:'POST',body:JSON.stringify(payload)});acceptSession(session.user,registering?'حساب کاربری با موفقیت ساخته شد':'با موفقیت وارد شدید');}catch(error){status.textContent=error.message;notify(error.message,'error');}finally{delete form.dataset.busy;form.removeAttribute('aria-busy');submit.disabled=false;submit.removeAttribute('aria-busy');submit.querySelector('span').textContent=registering?'ساخت حساب':'ورود';}
+},true);
+document.addEventListener('click',async event=>{
+  const tab=event.target.closest('[data-auth-tab]');if(tab){const form=document.querySelector('#authForm');if(!form)return;const registering=tab.dataset.authTab==='register';form.dataset.mode=registering?'register':'login';document.querySelectorAll('[data-auth-tab]').forEach(button=>{button.classList.toggle('active',button.dataset.authTab===tab.dataset.authTab);button.setAttribute('aria-selected',String(button.dataset.authTab===tab.dataset.authTab));});form.querySelector('#nameFields').hidden=!registering;form.querySelector('#authTitle').textContent=registering?'ساخت حساب کاربری':'ورود به حساب کاربری';form.querySelector('#identifierLabel').textContent=registering?'ایمیل':'ایمیل یا شماره موبایل';form.querySelector('#identifier').autocomplete=registering?'email':'username';form.querySelector('#password').autocomplete=registering?'new-password':'current-password';form.querySelector('.auth-submit span').textContent=registering?'ساخت حساب':'ورود';return;}
+  const toggle=event.target.closest('.password-toggle');if(toggle){const input=toggle.parentElement.querySelector('input'),show=input.type==='password';input.type=show?'text':'password';toggle.setAttribute('aria-pressed',String(show));toggle.setAttribute('aria-label',show?'پنهان کردن رمز عبور':'نمایش رمز عبور');toggle.innerHTML=authIcon(show?'eyeOff':'eye');return;}
+  if(event.target.closest('#forgotPassword')){const identifier=document.querySelector('#identifier')?.value.trim(),status=document.querySelector('#authStatus');try{await authRequest('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({identifier})});status.textContent='اگر حسابی با این اطلاعات وجود داشته باشد، راهنمای بازیابی ارسال می‌شود.';status.dataset.kind='success';}catch(error){status.textContent=error.message;}return;}
+},true);
+window.prepareGoogleLogin=async function(){const button=document.querySelector('#googleLogin'),help=document.querySelector('#googleHelp');if(!button||button.dataset.ready)return;try{const config=await authRequest('/api/auth/google/config');if(!config.enabled){help.textContent='ورود با گوگل هنوز توسط مدیر سایت فعال نشده است.';return;}button.dataset.ready='true';const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';script.async=true;script.onload=()=>{google.accounts.id.initialize({client_id:config.clientId,callback:async response=>{button.disabled=true;help.textContent='در حال اعتبارسنجی امن با گوگل…';try{const session=await authRequest('/api/auth/google',{method:'POST',body:JSON.stringify({credential:response.credential,remember:Boolean(document.querySelector('[name=remember]')?.checked)})});acceptSession(session.user,'با حساب گوگل وارد شدید');}catch(error){help.textContent=error.message;button.disabled=false;}}});button.disabled=false;button.addEventListener('click',()=>google.accounts.id.prompt());help.textContent='ورود امن با Google Identity Services';};script.onerror=()=>{help.textContent='سرویس گوگل در حال حاضر در دسترس نیست.';};document.head.appendChild(script);}catch(error){help.textContent=error.message;}};
+async function restoreRealSession(){try{const user=await authRequest('/api/auth/me');state.user=user;localStorage.setItem('maya-user',JSON.stringify(user));save();updateBadges();if(location.hash.startsWith('#admin')){if(user.role!=='ADMIN')location.hash='account';else{render();window.syncPersistentOrders?.(true);}}}catch(_){localStorage.removeItem('maya-user');state.user=null;state.cart=[];state.orders=[];save();if(location.hash.startsWith('#admin'))location.hash='account';}finally{if(location.hash.startsWith('#account')){render();setTimeout(window.prepareGoogleLogin,0);}}}
+window.addEventListener('hashchange',()=>{if(location.hash.startsWith('#account'))setTimeout(window.prepareGoogleLogin,0);});restoreRealSession();

@@ -452,7 +452,7 @@ function bindPage() {
     p.set("sort", e.target.value);
     location.hash = "products?" + p;
   });
-  document.querySelectorAll("[data-auth-tab]").forEach(
+  if (!$("#authForm")?.classList.contains("auth-form-v2")) document.querySelectorAll("[data-auth-tab]").forEach(
     (b) =>
       (b.onclick = () => {
         document

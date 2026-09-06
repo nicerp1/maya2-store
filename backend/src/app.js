@@ -16,10 +16,16 @@ app.use(express.json({ limit: '1mb' }));
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60_000, limit: 100 }));
 const ok = (res, data, status = 200) => res.status(status).json({ success: true, data });
 const fail = (res, message, status = 400) => res.status(status).json({ success: false, message });
-const tokenFor = (user) => jwt.sign({ sub: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
+const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME || 'maya_session';
+const tokenFor = (user, remember = false) => jwt.sign({ sub: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: remember ? '30d' : '1d' });
+const parseCookies = (header = '') => Object.fromEntries(header.split(';').map(value => value.trim().split('=').map(decodeURIComponent)).filter(pair => pair.length === 2));
+const sessionOptions = (remember = false) => ({ httpOnly:true, secure:process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL), sameSite:'lax', path:'/', ...(remember && { maxAge:30 * 24 * 60 * 60 * 1000 }) });
+const publicUser = (user) => ({ id:user.id, firstName:user.firstName, lastName:user.lastName, email:user.email, mobile:user.mobile, role:user.role });
+const startSession = (res, user, remember = false) => { res.cookie(SESSION_COOKIE, tokenFor(user, remember), sessionOptions(remember)); return publicUser(user); };
 const auth = (roles = []) => async (req, res, next) => {
   try {
-    const raw = req.headers.authorization?.replace('Bearer ', '');
+    const bearer = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
+    const raw = bearer || parseCookies(req.headers.cookie)[SESSION_COOKIE];
     req.auth = jwt.verify(raw, process.env.JWT_SECRET);
     if (roles.length && !roles.includes(req.auth.role)) return fail(res, 'دسترسی غیرمجاز است', 403);
     next();
@@ -34,14 +40,29 @@ app.post('/api/auth/register', async (req, res, next) => { try {
   const firstName=String(req.body.firstName||'').trim(), lastName=String(req.body.lastName||'').trim(), email=String(req.body.email||'').trim().toLowerCase(), mobile=String(req.body.mobile||'').replace(/[۰-۹]/g,d=>'0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)]).replace(/\s|-/g,''), password=String(req.body.password||'');
   if (!firstName || !lastName || !/^\S+@\S+\.\S+$/.test(email) || !/^09\d{9}$/.test(mobile) || password.length < 8) return fail(res, 'اطلاعات ثبت‌نام معتبر نیست');
   const user = await prisma.user.create({ data: { firstName, lastName, email, mobile, passwordHash: await bcrypt.hash(password, 12), cart: { create: {} }, wishlist: { create: {} } }, select: { id:true, firstName:true, lastName:true, email:true, role:true } });
-  return ok(res, { user, token: tokenFor(user) }, 201);
-} catch (e) { if(e?.code==='P2002') return fail(res,'این ایمیل یا شماره موبایل قبلاً ثبت شده است',409); next(e); } });
+  return ok(res, { user:startSession(res, user, Boolean(req.body.remember)) }, 201);
+} catch (e) { if(e?.code==='P2002') return fail(res,'امکان ایجاد حساب با این اطلاعات وجود ندارد',409); next(e); } });
 app.post('/api/auth/login', async (req, res, next) => { try {
-  const user = await prisma.user.findUnique({ where: { email: String(req.body.email).toLowerCase() } });
-  if (!user || !user.active || !(await bcrypt.compare(req.body.password || '', user.passwordHash))) return fail(res, 'ایمیل یا رمز عبور نادرست است', 401);
-  const safeUser = { id:user.id, firstName:user.firstName, lastName:user.lastName, email:user.email, mobile:user.mobile, role:user.role, active:user.active, createdAt:user.createdAt, updatedAt:user.updatedAt }; return ok(res, { user: safeUser, token: tokenFor(user) });
+  const identifier = String(req.body.identifier || req.body.email || '').trim().toLowerCase().replace(/[۰-۹]/g,d=>'0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)]).replace(/\s|-/g,'');
+  const user = await prisma.user.findFirst({ where: { OR:[{email:identifier},{mobile:identifier}] } });
+  if (!user || !user.active || !(await bcrypt.compare(String(req.body.password || ''), user.passwordHash))) return fail(res, 'اطلاعات ورود صحیح نیست', 401);
+  return ok(res, { user:startSession(res, user, Boolean(req.body.remember)) });
 } catch(e) { next(e); } });
 app.get('/api/auth/me', auth(), async (req,res) => ok(res, await prisma.user.findUnique({ where:{id:req.auth.sub}, select:{id:true,firstName:true,lastName:true,email:true,mobile:true,role:true} })));
+app.post('/api/auth/logout', (_req,res)=>{res.clearCookie(SESSION_COOKIE,sessionOptions(false));ok(res,{message:'خروج انجام شد'});});
+app.get('/api/auth/google/config', (_req,res)=>ok(res,{enabled:Boolean(process.env.GOOGLE_CLIENT_ID),clientId:process.env.GOOGLE_CLIENT_ID||null}));
+app.post('/api/auth/google', async(req,res,next)=>{try{
+  if(!process.env.GOOGLE_CLIENT_ID) return fail(res,'ورود با گوگل هنوز توسط مدیر سایت تنظیم نشده است',503);
+  const credential=String(req.body.credential||''); if(!credential) return fail(res,'پاسخ گوگل معتبر نیست');
+  const verifyResponse=await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+  const profile=await verifyResponse.json();
+  if(!verifyResponse.ok||profile.aud!==process.env.GOOGLE_CLIENT_ID||!['accounts.google.com','https://accounts.google.com'].includes(profile.iss)||profile.email_verified!=='true'||Number(profile.exp)*1000<Date.now()) return fail(res,'اعتبار ورود گوگل تأیید نشد',401);
+  const email=String(profile.email).toLowerCase();
+  let user=await prisma.user.findUnique({where:{email}});
+  if(!user) user=await prisma.user.create({data:{firstName:String(profile.given_name||'کاربر'),lastName:String(profile.family_name||'گوگل'),email,mobile:`google-${profile.sub}`,passwordHash:await bcrypt.hash(crypto.randomUUID(),12),cart:{create:{}},wishlist:{create:{}}}});
+  if(!user.active) return fail(res,'امکان ورود با این حساب وجود ندارد',401);
+  ok(res,{user:startSession(res,user,Boolean(req.body.remember))});
+}catch(e){next(e);}});
 app.get('/api/products', async (req,res,next) => { try {
   const page = Math.max(1, Number(req.query.page)||1), limit = Math.min(48, Math.max(1, Number(req.query.limit)||12));
   const where = { status:'ACTIVE', ...(req.query.category && {category:{slug:req.query.category}}), ...(req.query.brand && {brand:{slug:req.query.brand}}), ...(req.query.q && {OR:[{name:{contains:req.query.q,mode:'insensitive'}},{sku:{contains:req.query.q,mode:'insensitive'}},{brand:{name:{contains:req.query.q,mode:'insensitive'}}}]}) };
