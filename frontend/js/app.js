@@ -372,6 +372,7 @@ function render() {
   renderMega();
   if (window.lucide) lucide.createIcons();
   if (path === "account") setTimeout(() => window.prepareGoogleLogin?.(), 0);
+  if (path === "admin" && params.get("section") === "orders") setTimeout(() => window.renderPersistentOrders?.(), 0);
 }
 function add(id, qty = 1) {
   const item = state.cart.find((x) => x.id === id);

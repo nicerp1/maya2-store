@@ -82,6 +82,7 @@ async function renderPersistentOrders() {
     if (window.lucide) lucide.createIcons();
   } catch (error) { notify(error.message, 'error'); }
 }
+window.renderPersistentOrders = renderPersistentOrders;
 window.addEventListener('hashchange', () => setTimeout(renderPersistentOrders, 0));
 window.addEventListener('focus', renderPersistentOrders);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) renderPersistentOrders(); });
