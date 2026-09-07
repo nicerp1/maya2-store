@@ -5,7 +5,7 @@ const authIcon = (name) => ({
 }[name] || '');
 
 function accountPage() {
-  if (state.user) return `<main class="auth-shell"><section class="auth-account-card" aria-labelledby="account-title">${authIcon('shield')}<p class="auth-eyebrow">حساب امن مایا آزما</p><h1 id="account-title">${state.user.firstName} عزیز، خوش آمدید</h1><p>${state.user.email}</p><div class="auth-account-actions"><a class="btn" href="#orders">مشاهده سفارش‌ها</a><button class="auth-secondary" id="logout" type="button">خروج از حساب</button></div></section></main>`;
+  if (state.user) return `<div class="page-hero"><h1>پنل کاربری</h1><p>${state.user.firstName} عزیز، خوش آمدید.</p></div><div class="account-layout"><aside class="sidebar"><a class="active" href="#account">نمای کلی</a><a href="#orders">سفارش‌های من</a><a href="#wishlist">علاقه‌مندی‌ها</a>${state.user.role==='ADMIN'?'<a href="#admin">پنل مدیریت</a>':''}<button id="logout" type="button">خروج از حساب</button></aside><section><div class="stats"><div class="stat"><small>سفارش‌ها</small><strong>${fa(state.orders.length)}</strong></div><div class="stat"><small>علاقه‌مندی‌ها</small><strong>${fa(state.wish.length)}</strong></div></div><div class="panel account-profile"><h2>اطلاعات حساب</h2><div class="form-grid"><div><small>نام و نام خانوادگی</small><p>${state.user.firstName} ${state.user.lastName||''}</p></div><div><small>ایمیل</small><p>${state.user.email}</p></div></div></div></section></div>`;
   return `<main class="auth-shell">
     <section class="auth-brand" aria-label="معرفی مایا آزما">
       <picture><source srcset="assets/images/maya-azma-header-logo-dark.png" media="(prefers-color-scheme: dark)"><img src="assets/images/maya-azma-header-logo-transparent.png" alt="مایا آزما" width="260" height="96"></picture>
