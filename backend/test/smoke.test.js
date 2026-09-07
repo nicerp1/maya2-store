@@ -10,7 +10,7 @@ test('critical APIs are present', () => {
 });
 
 test('security middleware is configured', () => {
-  for (const feature of ['helmet()','rateLimit','jwt.verify','bcrypt.compare','auth([\'ADMIN\'])']) assert.ok(appSource.includes(feature), feature);
+  for (const feature of ['helmet({','rateLimit','jwt.verify','bcrypt.compare','auth([\'ADMIN\'])']) assert.ok(appSource.includes(feature), feature);
 });
 
 test('authentication uses secure cookies and verifies Google server-side', () => {

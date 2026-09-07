@@ -10,7 +10,14 @@ import { PrismaClient } from '@prisma/client';
 
 export const prisma = new PrismaClient();
 export const app = express();
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: { directives: {
+    scriptSrc: ["'self'", 'https://accounts.google.com'],
+    frameSrc: ["'self'", 'https://accounts.google.com'],
+    connectSrc: ["'self'", 'https://accounts.google.com'],
+  } },
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+}));
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000', credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60_000, limit: 100 }));
