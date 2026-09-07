@@ -348,6 +348,10 @@ function render() {
     [path, query = ""] = raw.split("?"),
     params = new URLSearchParams(query);
   let html = "";
+  if ((path === "account" || path === "admin") && window.authSessionReady !== true) {
+    $("#app").innerHTML = '<main class="auth-shell"><section class="auth-card" aria-busy="true"><p class="auth-status">در حال بررسی نشست امن…</p></section></main>';
+    return;
+  }
   if (path === "home") html = home();
   else if (path === "products") html = productsPage(params);
   else if (path === "product") html = productPage(params.get("id"));
