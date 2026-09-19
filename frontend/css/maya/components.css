@@ -1,6 +1,6 @@
 /* ============================================================
    components: buttons, cards, slider, benefits, forms, tables,
-   tabs, timeline, stats, summary, qty, badges
+   tabs, timeline, stats, summary, qty, badgesa
    ============================================================ */
 
 /* ---------- buttons ---------- */
@@ -142,7 +142,7 @@ body.dark .add-cart { color: #06231c; }
 /* ---------- hero slider ---------- */
 .hero-slider { position: relative; overflow: hidden; background: var(--surface-2); }
 .slides-track { display: flex; direction: ltr; transition: transform .6s cubic-bezier(.2,.7,.2,1); }
-.hero-slide {
+.hero-slide {  direction: rtl;
   flex: 0 0 100%;
   min-height: clamp(340px, 46vw, 520px);
   background-size: cover;
