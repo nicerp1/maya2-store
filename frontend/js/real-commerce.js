@@ -67,7 +67,7 @@ async function syncPersistentOrders(shouldRender = false) {
       invoice: { subtotal:Number(order.subtotal), discount:Number(order.discount || 0), shipping:Number(order.shipping || 0), total:Number(order.total) }
     }));
     save();
-    if (shouldRender && /#(?:orders|invoice|tracking|admin|account)/.test(location.hash)) render();
+    if (shouldRender && /#(?:orders|invoice|order-success|tracking|admin|account)/.test(location.hash)) render();
   } catch (error) { notify('دریافت سفارش‌ها انجام نشد: ' + error.message, 'error'); }
 }
 
@@ -132,10 +132,19 @@ document.addEventListener('submit', async event => {
     await Promise.all(pendingCart.values());
     await syncPersistentCart();
     const order = await mayaApi('/api/checkout', { method: 'POST', body: JSON.stringify({ province: values.province, city: values.city, address: values.address, postalCode: values.postal, shippingMethod: values.shipping === 'اکسپرس' ? 'EXPRESS' : 'STANDARD' }) });
-    state.orders.unshift({ number: order.orderNumber, date: new Date(order.createdAt).toLocaleDateString('fa-IR'), total: Number(order.total), status: order.status, items: [...state.cart] });
+    state.orders.unshift({
+      number: order.orderNumber,
+      invoiceNumber: order.invoiceNumber,
+      date: new Date(order.createdAt).toLocaleDateString('fa-IR'),
+      time: new Date(order.createdAt).toLocaleTimeString('fa-IR', { hour:'2-digit', minute:'2-digit' }),
+      total: Number(order.total), status: order.status,
+      customer: { ...state.user, province:values.province, city:values.city, address:values.address, postalCode:values.postal },
+      invoiceItems: (order.items || []).map(item => ({ name:item.productSnapshot?.name || 'محصول', sku:item.productSnapshot?.sku || '', quantity:item.quantity, unitPrice:Number(item.unitPrice), discount:Number(item.discount || 0) })),
+      invoice: { subtotal:Number(order.subtotal), discount:Number(order.discount || 0), shipping:Number(order.shipping || 0), total:Number(order.total) }
+    });
     state.cart = []; save();
     await syncPersistentOrders();
-    notify('سفارش با موفقیت ثبت شد'); location.hash = `invoice?number=${encodeURIComponent(order.invoiceNumber || order.orderNumber)}`;
+    notify('سفارش با موفقیت ثبت شد'); location.hash = `order-success?number=${encodeURIComponent(order.invoiceNumber || order.orderNumber)}`;
   } catch (error) { notify(error.message, 'error'); }
   finally { checkoutBusy = false; if (submit) { submit.disabled = false; submit.textContent = 'ثبت سفارش'; } }
 }, true);
@@ -152,8 +161,10 @@ window.syncPersistentOrders = syncPersistentOrders;
 syncPersistentCart().catch(() => {});
 syncPersistentOrders(true);
 window.addEventListener('hashchange', () => {
-  if (/^#(orders|invoice|tracking|admin|account)/.test(location.hash)) syncPersistentOrders(true);
+  if (location.hash.startsWith('#order-success') && state.orders.some(order => location.hash.includes(encodeURIComponent(order.invoiceNumber || order.number)))) return;
+  if (/^#(orders|invoice|order-success|tracking|admin|account)/.test(location.hash)) syncPersistentOrders(true);
 });
 window.addEventListener('focus', () => {
-  if (/^#(orders|invoice|tracking|admin|account)/.test(location.hash)) syncPersistentOrders(true);
+  if (location.hash.startsWith('#order-success')) return;
+  if (/^#(orders|invoice|order-success|tracking|admin|account)/.test(location.hash)) syncPersistentOrders(true);
 });
